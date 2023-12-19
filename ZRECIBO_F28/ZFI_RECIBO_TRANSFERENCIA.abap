@@ -14,23 +14,40 @@ DATA: it_alv TYPE ztt_recibo_transferencia,
 
 DATA: lv_valor TYPE dmbtr.
 DATA: lv_answer TYPE char1.
-
 TYPE-POOLS: slis.
-
 
 
 SELECTION-SCREEN:BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
   SELECT-OPTIONS: s_belnr FOR bkpf-belnr,  "DEFAULT '1400000021',
                   s_budat FOR bkpf-budat,
-                  s_blart FOR bkpf-blart.
+                  s_blart FOR bkpf-blart MODIF ID mod.
 
   PARAMETERS: p_bukrs LIKE bkpf-bukrs OBLIGATORY DEFAULT 'P16',
               p_gjahr LIKE bkpf-gjahr OBLIGATORY DEFAULT sy-datum(4).
 
 
-
 SELECTION-SCREEN: END OF BLOCK b1.
 
+INITIALIZATION.
+
+  SELECT * FROM tvarvc INTO TABLE @DATA(lt_blart)
+    WHERE name EQ 'ZFI_ZRECIBO_F28'.
+
+  LOOP AT lt_blart INTO DATA(ls_blart).
+    s_blart-sign    = 'I'.
+    s_blart-option  = 'EQ'.
+    s_blart-low     = ls_blart-low.
+    APPEND s_blart.
+  ENDLOOP.
+
+*  LOOP AT SCREEN.
+*    IF screen-group1 = 'MOD'.
+*      screen-input = 0.
+*      screen-active = 0.
+*      screen-invisible = 1.
+*      MODIFY SCREEN.
+*    ENDIF.
+*  ENDLOOP.
 
 START-OF-SELECTION .
 
@@ -51,6 +68,8 @@ END-OF-SELECTION.
 *&---------------------------------------------------------------------*
 FORM get_data .
 
+  DATA: lt_bsad TYPE TABLE OF bsad.
+
   SELECT * FROM bkpf INTO TABLE @DATA(lt_bkpf)
     WHERE belnr IN @s_belnr
       AND budat IN @s_budat
@@ -58,14 +77,32 @@ FORM get_data .
       AND gjahr EQ @p_gjahr
       AND blart IN @s_blart.
 
+  IF sy-subrc NE 0.
+    SELECT * FROM bseg INTO TABLE @DATA(lt_bseg_ant)
+    WHERE belnr   IN @s_belnr
+      AND h_budat IN @s_budat
+      AND bukrs   EQ @p_bukrs
+      AND gjahr   EQ @p_gjahr
+      AND umskz   IN ( 'A', 'T' ).
+  ENDIF.
+
   IF sy-subrc EQ 0.
-    SELECT * FROM bsad INTO TABLE @DATA(lt_bsad)
-      FOR ALL ENTRIES IN @lt_bkpf
-      WHERE belnr EQ @lt_bkpf-belnr
-*      WHERE augbl EQ ( SELECT augbl FROM bsad WHERE belnr EQ @lt_bkpf-belnr )
-        AND gjahr EQ @lt_bkpf-gjahr
-        AND budat EQ @lt_bkpf-budat
-        AND bukrs EQ @lt_bkpf-bukrs.
+    SELECT * FROM bsad INTO TABLE lt_bsad
+      FOR ALL ENTRIES IN lt_bkpf
+*      WHERE belnr EQ @lt_bkpf-belnr
+      WHERE augbl EQ lt_bkpf-belnr
+        AND gjahr EQ lt_bkpf-gjahr
+        AND budat EQ lt_bkpf-budat
+        AND bukrs EQ lt_bkpf-bukrs.
+    IF sy-subrc NE 0..
+      SELECT * FROM bsad INTO TABLE lt_bsad
+        FOR ALL ENTRIES IN lt_bkpf
+        WHERE belnr EQ lt_bkpf-belnr
+*        WHERE augbl EQ @lt_bkpf-belnr
+          AND gjahr EQ lt_bkpf-gjahr
+          AND budat EQ lt_bkpf-budat
+          AND bukrs EQ lt_bkpf-bukrs.
+    ENDIF.
 
     IF sy-subrc EQ 0.
       SELECT * FROM kna1 INTO TABLE @DATA(lt_kna1)
@@ -98,10 +135,8 @@ FORM get_data .
     wa_alv-waers = ls_bkpf-waers.   "moneda
     wa_alv-bktxt = ls_bkpf-bktxt.   "nro. comprob. fiscal
     wa_alv-blart = ls_bkpf-blart.   "clase doc.
-
 *    wa_alv-usnam = ls_bkpf-usnam.   "usuario
 *    wa_alv-cputm = ls_bkpf-cputm.   "hora
-
 
     READ TABLE lt_bsad INTO DATA(ls_bsad) WITH KEY belnr = ls_bkpf-belnr bukrs = ls_bkpf-bukrs gjahr = ls_bkpf-gjahr.
     IF sy-subrc EQ 0.
@@ -116,17 +151,13 @@ FORM get_data .
     ENDIF.
 
     CLEAR: ls_bsad.
-
-    LOOP AT lt_bsad INTO ls_bsad WHERE belnr = ls_bkpf-belnr
-                                   AND bukrs = ls_bkpf-bukrs
-                                   AND gjahr = ls_bkpf-gjahr.
-
-*      IF ls_bsad-blart NE 'DZ' AND ls _bsad-shkzg EQ 'H'.
-      wa_alv-dmbtr = wa_alv-dmbtr + ls_bsad-dmbtr.  "valor
-*      ENDIF.
-
+    LOOP AT lt_bsad INTO ls_bsad WHERE belnr = ls_bkpf-belnr AND bukrs = ls_bkpf-bukrs AND gjahr = ls_bkpf-gjahr.
+      IF ls_bkpf-waers EQ 'USD'.
+        wa_alv-dmbtr = wa_alv-dmbtr + ls_bsad-wrbtr. "Importe moneda documento
+      ELSE.
+        wa_alv-dmbtr = wa_alv-dmbtr + ls_bsad-dmbtr. "Importe moneda local
+      ENDIF.
     ENDLOOP.
-
 
     READ TABLE lt_bseg INTO DATA(ls_bseg) WITH KEY belnr = ls_bkpf-belnr
                                                    bukrs = ls_bkpf-bukrs
