@@ -3,29 +3,27 @@
 *&---------------------------------------------------------------------*
 REPORT zfi_balance_saldos_2.
 
-TABLES: acdoca, fagl_011zc, fagl_011qt, sscrfields.
+TABLES: acdoca, zvs_balance, fagl_011zc, fagl_011qt, sscrfields.
 
 *&---------------------------------------------------------------------*
 *&   T Y P E S  -  S T R U C T U R E S  -  T A B L E S
 *&---------------------------------------------------------------------*
-
 CONSTANTS: i_folio TYPE char4 VALUE '@98@',
            v_folio TYPE tabname VALUE 'ZTFI_FOLIOS_BALA',
            i_conta TYPE char4 VALUE '@A0@',
            v_conta TYPE tabname VALUE 'ZTFI_CONTAD_BALA'.
 
+DATA: smp_dyntxt TYPE smp_dyntxt.
+
 RANGES: r_racct FOR acdoca-racct,
         r_1201_d FOR acdoca-racct,
         r_1201_a FOR acdoca-racct.
 
-DATA: smp_dyntxt TYPE smp_dyntxt.
-"t_folio    TYPE zttb_folio_page.
-
 DATA: ls_header      TYPE zst_balance_header,
       ls_data        TYPE zst_balance_data,
       lt_data        TYPE TABLE OF zst_balance_data,
-      ls_clean       TYPE zst_balance_data,             "zst_balance_van_vienen,
-      lt_clean       TYPE TABLE OF zst_balance_data,    "zst_balance_van_vienen,
+      ls_clean       TYPE zst_balance_data,
+      lt_clean       TYPE TABLE OF zst_balance_data,
       ls_vavi        TYPE zst_balance_van_vienen,
       lt_vavi        TYPE TABLE OF zst_balance_van_vienen,
       lv_langu       TYPE spras,
@@ -132,7 +130,6 @@ FORM get_data.
   TRANSLATE ls_header-periodo TO UPPER CASE.
   MOVE ls_t001-butxt TO ls_header-sociedad.
   MOVE 'BALANCE DE SALDOS' TO ls_header-balance.
-*  MOVE 'AL DATE_LAST+6(2)PERIODO' TO ls_header-periodo.
   MOVE '(CIFRAS EN QUETZALES)' TO  ls_header-cifras.
 
 *&---------------------------------------------------------------------*
@@ -145,10 +142,8 @@ FORM get_data.
       output = lv_langu.
 
   SELECT * FROM fagl_011zc INTO TABLE @DATA(lt_011zc)
-*    UP TO 20 ROWS
     WHERE versn EQ 'Z010'
       AND ktopl EQ @p_ktopl.
-
 
   SELECT * FROM fagl_011qt INTO TABLE @DATA(lt_011qt)
     WHERE versn EQ 'Z010'
@@ -165,34 +160,40 @@ FORM get_data.
                     TO r_racct.
   ENDLOOP.
 
-  "start test
-*  IF sy-uname EQ 'CONSULABAP05'.
-*    REFRESH: r_racct.
-*    APPEND VALUE #( sign   = 'I'
-*                    option = 'BT'
-*                    low    = 1101110001
-*                    high   = 1101999999 )
-*                    TO r_racct.
-*  ENDIF.
-*
-*  DELETE lt_011zc WHERE ergsl NE 08.
-  "end test
-
-  SELECT * FROM acdoca INTO TABLE @DATA(lt_acdoca)
+  SELECT * FROM zvs_balance INTO TABLE @DATA(lt_acdoca)
     WHERE rldnr EQ @p_rldnr
       AND rbukrs EQ @p_bukrs
       AND gjahr EQ @p_gjahr
       AND poper IN @s_poper
       AND racct IN @r_racct.
-*  BREAK consulabap05 .
+
+
+  DATA: stabix TYPE char10,
+        total  TYPE i,
+        stotal TYPE char10,
+        msg    TYPE char200.
+
+  DESCRIBE TABLE lt_011zc LINES total.
 
   LOOP AT lt_011zc INTO ls_011zc.
+
+    stabix = sy-tabix.
+
+    "Mensaje de procesamiento en tiempo de carga
+    WRITE: sy-tabix TO stabix, total TO stotal.
+    CONDENSE: stabix, stotal.
+    CONCATENATE 'Procesando: cuentas' ls_011zc-vonkt(4) '[' stabix ' de ' stotal ']'  INTO msg SEPARATED BY space.
+    cl_progress_indicator=>progress_indicate( EXPORTING
+                               i_text               = msg
+                               i_processed          = sy-tabix
+                               i_total              = total
+                               i_output_immediately =  'X' ).
+
 
     READ TABLE lt_011qt INTO DATA(ls_011qt) WITH KEY ergsl = ls_011zc-ergsl.
     IF sy-subrc EQ 0.
       ls_data-cuenta = ls_011qt-txt45.
     ENDIF.
-
 
     REFRESH: r_racct.
     APPEND VALUE #( sign   = 'I'
@@ -215,7 +216,6 @@ FORM get_data.
 
     ENDLOOP.
 
-*    lv_totals = lv_balance.
 
     CASE ls_data-cuenta(1).
       WHEN 1.
@@ -400,98 +400,15 @@ FORM get_data.
     ENDCASE.
 
 
-
-
-
     APPEND ls_data TO lt_data.
     CLEAR: ls_data, lv_balance.
 
   ENDLOOP.
-  BREAK consulabap05.
+
   WRITE lv_total_d TO total_deudor NO-SIGN.
   WRITE lv_total_a TO total_acreedor NO-SIGN.
 
   CONDENSE: total_deudor, total_acreedor.
-*
-*  BREAK-POINT.
-*  LOOP AT lt_data ASSIGNING FIELD-SYMBOL(<fs_data>).
-*    CASE <fs_data>-cuenta(1).
-*      WHEN 1.
-*        SEARCH <fs_data>-deudor FOR '-'.
-*        IF sy-subrc EQ 0.
-*          WRITE lv_balance TO <fs_data>-deudor NO-SIGN.
-*          CONDENSE <fs_data>-deudor.
-*          <fs_data>-deudor = |({ <fs_data>-deudor })|.
-*        ELSE.
-*          WRITE lv_balance TO <fs_data>-deudor NO-SIGN.
-*          CONDENSE <fs_data>-deudor.
-*        ENDIF.
-*      WHEN 2.
-*        IF lv_balance > 0.
-*          WRITE lv_balance TO <fs_data>-acreedor NO-SIGN.
-*          CONDENSE <fs_data>-acreedor.
-*          <fs_data>-acreedor = |({ <fs_data>-acreedor })|.
-*        ELSE.
-*          WRITE lv_balance TO <fs_data>-acreedor NO-SIGN.
-*          CONDENSE <fs_data>-acreedor.
-*        ENDIF.
-*      WHEN 3.
-*        IF lv_balance > 0.
-*          WRITE lv_balance TO <fs_data>-acreedor NO-SIGN.
-*          CONDENSE <fs_data>-acreedor.
-*          <fs_data>-acreedor = |({ <fs_data>-acreedor })|.
-*        ELSE.
-*          WRITE lv_balance TO <fs_data>-acreedor NO-SIGN.
-*          CONDENSE <fs_data>-acreedor.
-*        ENDIF.
-*      WHEN 4.
-*        IF lv_balance > 0.
-*          WRITE lv_balance TO <fs_data>-acreedor NO-SIGN.
-*          CONDENSE <fs_data>-acreedor.
-*          <fs_data>-acreedor = |({ <fs_data>-acreedor })|.
-*        ELSE.
-*          WRITE lv_balance TO <fs_data>-acreedor NO-SIGN.
-*          CONDENSE <fs_data>-acreedor.
-*        ENDIF.
-*      WHEN 5.
-*        IF lv_balance < 0.
-*          WRITE lv_balance TO <fs_data>-deudor NO-SIGN.
-*          CONDENSE <fs_data>-deudor.
-*          <fs_data>-deudor = |({ <fs_data>-deudor })|.
-*        ELSE.
-*          WRITE lv_balance TO <fs_data>-deudor NO-SIGN.
-*          CONDENSE <fs_data>-deudor.
-*        ENDIF.
-*      WHEN 6.
-*        IF lv_balance < 0.
-*          WRITE lv_balance TO <fs_data>-deudor NO-SIGN.
-*          CONDENSE <fs_data>-deudor.
-*          <fs_data>-deudor = |({ <fs_data>-deudor })|.
-*        ELSE.
-*          WRITE lv_balance TO <fs_data>-deudor NO-SIGN.
-*          CONDENSE <fs_data>-deudor.
-*        ENDIF.
-*      WHEN 7.
-*        IF lv_balance > 0.
-*          WRITE lv_balance TO <fs_data>-acreedor NO-SIGN.
-*          CONDENSE <fs_data>-acreedor.
-*          <fs_data>-acreedor = |({ <fs_data>-acreedor })|.
-*        ELSE.
-*          WRITE lv_balance TO <fs_data>-acreedor NO-SIGN.
-*          CONDENSE <fs_data>-acreedor.
-*        ENDIF.
-*      WHEN 8.
-*        IF lv_balance < 0.
-*          WRITE lv_balance TO <fs_data>-deudor NO-SIGN.
-*          CONDENSE <fs_data>-deudor.
-*          <fs_data>-deudor = |({ <fs_data>-deudor })|.
-*        ELSE.
-*          WRITE lv_balance TO <fs_data>-deudor NO-SIGN.
-*          CONDENSE <fs_data>-deudor.
-*        ENDIF.
-*    ENDCASE.
-*  ENDLOOP.
-
 
 
 ENDFORM.
